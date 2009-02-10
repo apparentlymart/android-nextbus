@@ -25,6 +25,8 @@ public abstract class DataFetcher {
     public static void fetch(String url, Callback cb) {
         final Handler handler = new Handler();
 
+        Log.d(LOG_TAG, "Starting a runthread to fetch "+url);
+
         new RunThread(handler, url, cb, cookies).start();
     }
 

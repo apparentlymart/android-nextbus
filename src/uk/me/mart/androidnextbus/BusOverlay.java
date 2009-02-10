@@ -44,8 +44,14 @@ public class BusOverlay extends Overlay {
 
             // Draw the stops we know about.
             java.util.Collection<BusInfo.Stop> stops = busInfo.getStopsInRect(gp1, gp2);
-            for (BusInfo.Stop stop : stops) {
-                drawStop(canvas, stop.getLatitude(), stop.getLongitude(), proj);
+            //for (BusInfo.Stop stop : stops) {
+            //    drawStop(canvas, stop.getGeoPoint(), proj);
+            //}
+
+            // Draw the vehicles we know about.
+            java.util.Collection<BusInfo.Vehicle> vehicles = busInfo.getVehiclesInRect(gp1, gp2);
+            for (BusInfo.Vehicle vehicle : vehicles) {
+                drawVehicle(canvas, vehicle, proj);
             }
         }
         else {
@@ -66,6 +72,18 @@ public class BusOverlay extends Overlay {
         proj.toPixels(gp, p);
         canvas.drawCircle(p.x, p.y, 3, stopOutlinePaint);
         canvas.drawCircle(p.x, p.y, 2, stopFillPaint);
+    }
+
+    private void drawVehicle(Canvas canvas, BusInfo.Vehicle vehicle, Projection proj) {
+        canvas.save();
+        Point p = new Point();
+        GeoPoint gp = vehicle.getGeoPoint();
+        proj.toPixels(gp, p);
+        canvas.translate(p.x, p.y);
+        canvas.rotate(vehicle.getHeading());
+        canvas.drawRect(-3, -5, 3, 5, stopFillPaint);
+        canvas.drawRect(-3, -5, 3, -2, stopOutlinePaint);
+        canvas.restore();
     }
 
 }

@@ -22,16 +22,18 @@ public class NextBusActivity extends MapActivity {
         map.setSatellite(false);
 
         busInfo = new BusInfo();
-        busInfo.addRoute("22");
+        //busInfo.addRoute("22");
         busInfo.addRoute("J");
         busInfo.addRoute("KT");
         busInfo.addRoute("L");
         busInfo.addRoute("M");
         busInfo.addRoute("N");
+        //busInfo.addRoute("N OWL");
         busInfo.addRoute("F");
         busInfo.addRoute("6");
         busInfo.addRoute("7");
         busInfo.addRoute("71");
+        //busInfo.addRoute("35");
         busInfo.startSession();
 
         MyLocationOverlay locationOverlay = new MyLocationOverlay(this, map);
