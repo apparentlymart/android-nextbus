@@ -3,12 +3,10 @@ package uk.me.mart.androidnextbus;
 
 import android.util.Log;
 import java.util.*;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
 import java.net.URLEncoder;
 import com.google.android.maps.GeoPoint;
 import android.os.Handler;
+import org.json.*;
 
 public class BusInfo {
 
@@ -31,7 +29,7 @@ public class BusInfo {
         // Kick things off with a request to the main Google Map page
         // so that we have a session cookie for our subsequent requests.
         DataFetcher.fetch(MAIN_PAGE_URL, new DataFetcher.Callback() {
-            public void cb(Document doc) {
+            public void cb(JSONObject obj) {
                 Log.d(LOG_TAG, "Started a session with NextBus");
                 sessionStarted = true;
                 initializeInitialRoutes();
@@ -102,10 +100,14 @@ public class BusInfo {
             Log.d(LOG_TAG, "Doing initialization for route "+number);
 
             DataFetcher.fetch(this.getConfigUrl(), new DataFetcher.Callback() {
-                public void cb(org.w3c.dom.Document doc) {
+                public void cb(JSONObject obj) {
                     Log.d(LOG_TAG, "Retrieved route information for "+getNumber());
 
-                    NodeList rnl = doc.getElementsByTagName("route");
+                    // Start polling for vehicle locations
+                    Log.d(LOG_TAG, "Completed initialization for route "+number);
+                    vlf = new VehicleLocationFetcher();
+
+                    /*NodeList rnl = doc.getElementsByTagName("route");
                     if (rnl.getLength() > 0) {
                         Element routeElem = (Element)rnl.item(0);
                         name = routeElem.getAttribute("title");
@@ -138,7 +140,7 @@ public class BusInfo {
                         // Start polling for vehicle locations
                         Log.d(LOG_TAG, "Completed initialization for route "+number);
                         vlf = new VehicleLocationFetcher();
-                    }
+                        }*/
                 }
             });
         }
@@ -148,7 +150,6 @@ public class BusInfo {
         }
 
         private class VehicleLocationFetcher implements DataFetcher.Callback, Runnable {
-            private String lastTime = "1";
             private boolean requestInProgress = false;
             private String url = null;
             private Handler handler = null;
@@ -166,74 +167,54 @@ public class BusInfo {
 
                 timer.scheduleAtFixedRate(timerTask, 2000, 15000);
 
-                this.url = "http://www.nextmuni.com/s/COM.NextBus.Servlets.XMLFeed?command=vehicleLocations&a=sf-muni&r="+eurl(number)+"&t=";
+                this.url = "http://10.0.2.2:9080/vehicle-locations?routes="+eurl(number);
             }
 
-            public void cb(org.w3c.dom.Document doc) {
+            public void cb(org.json.JSONObject obj) {
 
-                if (doc != null) {
+                if (obj != null) {
 
                     Log.d(LOG_TAG, "Retrieved bus location information for route "+number);
 
-                    NodeList vnl = doc.getElementsByTagName("vehicle");
-                    int vehicleCount = vnl.getLength();
-                    for (int i = 0; i < vehicleCount; i++) {
-                        try {
-                            Element vehicleElem = (Element)vnl.item(i);
-
-                            // If leadingVehicleId is present then we have
-                            // the second car of a two-car train, so let's ignore it.
-                            if (! vehicleElem.getAttribute("leadingVehicleId").equals("")) {
-                                continue;
-                            }
-
-                            // Also ignore it if it's not marked as "predictable"
-                            if (vehicleElem.getAttribute("leadingVehicleId").equals("false")) {
-                                continue;
-                            }
-
-                            String latitude = vehicleElem.getAttribute("lat");
-                            String longitude = vehicleElem.getAttribute("lon");
-                            String id = vehicleElem.getAttribute("id");
-                            String routeNumber = vehicleElem.getAttribute("routeTag");
-                            String secsSinceLastReport = vehicleElem.getAttribute("secsSinceReport");
-                            String heading = vehicleElem.getAttribute("heading");
-
-                            Vehicle vehicle = new Vehicle(
-                                Integer.parseInt(id),
-                                routeNumber,
-                                (int)(Float.parseFloat(latitude)*1E6),
-                                (int)(Float.parseFloat(longitude)*1E6),
-                                (int)(Integer.parseInt(heading)),
-                                (int)(Integer.parseInt(secsSinceLastReport))
-                            );
-
-                            geoVehicles.put(vehicle.getGeoPoint(), vehicle);
-                            Log.d(LOG_TAG, "Got location update for "+vehicle);
-                        }
-                        catch (NumberFormatException ex) {
-                            // One of the attributes was missing or didn't contain
-                            // a number, I guess. Just ignore it.
-                        }
+                    JSONArray arr = obj.optJSONArray("list");
+                    if (arr == null) {
+                        return;
                     }
 
-                    NodeList ltnl = doc.getElementsByTagName("lastTime");
-                    if (ltnl.getLength() > 0) {
-                        String lastTime = ((Element)ltnl.item(0)).getAttribute("time");
-                        if (lastTime != null) {
-                            this.lastTime = lastTime;
-                        }
+                    int vehicleCount = arr.length();
+                    for (int i = 0; i < vehicleCount; i++) {
+                        JSONObject vehicleObj = arr.optJSONObject(i);
+                        if (vehicleObj == null) continue;
+
+                        int latitude = (int)(vehicleObj.optDouble("lat")*1E6);
+                        int longitude = (int)(vehicleObj.optDouble("lon")*1E6);
+                        int id = vehicleObj.optInt("id");
+                        String routeNumber = vehicleObj.optString("routeTag");
+                        int secsSinceLastReport = vehicleObj.optInt("secsSinceReport");
+                        int heading = vehicleObj.optInt("heading");
+
+                        Vehicle vehicle = new Vehicle(
+                            id,
+                            routeNumber,
+                            latitude,
+                            longitude,
+                            heading,
+                            secsSinceLastReport
+                        );
+
+                        geoVehicles.put(vehicle.getGeoPoint(), vehicle);
+                        Log.d(LOG_TAG, "Got location update for "+vehicle);
                     }
 
                     if (vehicleCount > 0) {
                         fireUpdateNotification();
                     }
 
-                    requestInProgress = false;
                 }
                 else {
                     Log.d(LOG_TAG, "Failed to retrieve location information for route "+number);
                 }
+                requestInProgress = false;
             }
 
             public void run() {
@@ -253,7 +234,7 @@ public class BusInfo {
             }
 
             private String getNextRequestURL() {
-                return this.url+lastTime;
+                return this.url;
             }
 
         }

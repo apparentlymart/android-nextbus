@@ -1,9 +1,6 @@
 
 package uk.me.mart.androidnextbus;
 
-import org.w3c.dom.Document;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 import android.os.Handler;
 import org.apache.http.client.HttpClient;
 import org.apache.http.impl.client.AbstractHttpClient;
@@ -15,6 +12,9 @@ import android.util.Log;
 import org.apache.http.client.params.CookiePolicy;
 import org.apache.http.client.CookieStore;
 import org.apache.http.impl.client.BasicCookieStore;
+import org.json.*;
+import java.io.Reader;
+import java.io.InputStreamReader;
 
 public abstract class DataFetcher {
 
@@ -31,7 +31,7 @@ public abstract class DataFetcher {
     }
 
     public interface Callback {
-        public void cb(Document doc);
+        public void cb(JSONObject obj);
     }
 
     private static class RunThread extends Thread {
@@ -62,45 +62,66 @@ public abstract class DataFetcher {
                 res = client.execute(req);
             }
             catch (java.io.IOException ex) {
+                Log.d(LOG_TAG, "HTTP request failed: "+ex.getMessage());
                 res = null;
             }
 
-            Document doc = null;
+            JSONObject obj = null;
 
             if (res != null) {
-                // I hate Java.
-                try  {
-                    DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                    DocumentBuilder parser = factory.newDocumentBuilder();
-                    doc = parser.parse(res.getEntity().getContent());
-                }
-                catch (javax.xml.parsers.ParserConfigurationException ex) {
-                    throw new java.lang.RuntimeException("Failed to create an XML parser");
+                try {
+                    int contentLength = (int)res.getEntity().getContentLength();
+                    if (contentLength < 0) {
+                        Log.d(LOG_TAG, "No Content-Length in response? Let's just make one up.");
+                        contentLength = 32000;
+                    }
+                    char[] buf = new char[contentLength];
+                    Reader reader = new InputStreamReader(res.getEntity().getContent(), "UTF-8");
+                    reader.read(buf, 0, contentLength);
+                    String jsonData = new String(buf);
+                    try {
+                        if (buf[0] == '[') {
+                            // It's an array
+                            // Since our callback can only deal in objects, we make an
+                            // object with a single element called 'list' containing
+                            // the list.
+
+                            JSONArray arr = new JSONArray(jsonData);
+                            obj = new JSONObject();
+                            obj.put("list", arr);
+                        }
+                        else {
+                            // It's an object
+                            obj = new JSONObject(jsonData);
+                        }
+                    }
+                    catch (JSONException ex) {
+                        Log.d(LOG_TAG, "JSON parsing failed: "+ex.getMessage());
+                        // Don't care. obj is null.
+                    }
                 }
                 catch (java.io.IOException ex) {
-                    doc = null;
-                }
-                catch (org.xml.sax.SAXException ex) {
-                    doc = null;
+                    Log.d(LOG_TAG, "Failed to read response body: "+ex.getMessage());
+                    // Don't care.
                 }
             }
 
-            handler.post(new RunCallback(doc, cb));
+            handler.post(new RunCallback(obj, cb));
         }
     }
 
     private static class RunCallback implements Runnable {
-        private Document doc;
+        private JSONObject obj;
         private Callback cb;
 
-        public RunCallback(Document doc, Callback cb) {
-            this.doc = doc;
+        public RunCallback(JSONObject obj, Callback cb) {
+            this.obj = obj;
             this.cb = cb;
         }
 
         public void run() {
             Log.d(LOG_TAG, "Completed request");
-            this.cb.cb(this.doc);
+            this.cb.cb(this.obj);
         }
     }
 
