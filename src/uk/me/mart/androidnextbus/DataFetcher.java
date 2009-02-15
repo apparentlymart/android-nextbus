@@ -15,6 +15,9 @@ import org.apache.http.impl.client.BasicCookieStore;
 import org.json.*;
 import java.io.Reader;
 import java.io.InputStreamReader;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
 
 public abstract class DataFetcher {
 
@@ -70,34 +73,31 @@ public abstract class DataFetcher {
 
             if (res != null) {
                 try {
-                    int contentLength = (int)res.getEntity().getContentLength();
-                    if (contentLength < 0) {
-                        Log.d(LOG_TAG, "No Content-Length in response? Let's just make one up.");
-                        contentLength = 32000;
-                    }
-                    char[] buf = new char[contentLength];
-                    Reader reader = new InputStreamReader(res.getEntity().getContent(), "UTF-8");
-                    reader.read(buf, 0, contentLength);
-                    String jsonData = new String(buf);
-                    try {
-                        if (buf[0] == '[') {
-                            // It's an array
-                            // Since our callback can only deal in objects, we make an
-                            // object with a single element called 'list' containing
-                            // the list.
+                    String jsonData = readStream(res.getEntity().getContent());
+                    if (jsonData != null) {
+                        try {
+                            if (jsonData.charAt(0) == '[') {
+                                // It's an array
+                                // Since our callback can only deal in objects, we make an
+                                // object with a single element called 'list' containing
+                                // the list.
 
-                            JSONArray arr = new JSONArray(jsonData);
-                            obj = new JSONObject();
-                            obj.put("list", arr);
+                                JSONArray arr = new JSONArray(jsonData);
+                                obj = new JSONObject();
+                                obj.put("list", arr);
+                            }
+                            else {
+                                // It's an object
+                                obj = new JSONObject(jsonData);
+                            }
                         }
-                        else {
-                            // It's an object
-                            obj = new JSONObject(jsonData);
+                        catch (JSONException ex) {
+                            Log.d(LOG_TAG, "JSON parsing failed: "+ex.getMessage());
+                            // Don't care. obj is null.
                         }
                     }
-                    catch (JSONException ex) {
-                        Log.d(LOG_TAG, "JSON parsing failed: "+ex.getMessage());
-                        // Don't care. obj is null.
+                    else {
+                        Log.d(LOG_TAG, "Failure to read response body");
                     }
                 }
                 catch (java.io.IOException ex) {
@@ -108,6 +108,30 @@ public abstract class DataFetcher {
 
             handler.post(new RunCallback(obj, cb));
         }
+    }
+
+    private static String readStream(InputStream is) {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+        StringBuilder sb = new StringBuilder();
+
+        String line = null;
+        try {
+            while ((line = reader.readLine()) != null) {
+                sb.append(line + "\n");
+            }
+        }
+        catch (IOException e) {
+            return null;
+        }
+        finally {
+            try {
+                is.close();
+            }
+            catch (IOException e) {
+                // Don't care
+            }
+        }
+        return sb.toString();
     }
 
     private static class RunCallback implements Runnable {

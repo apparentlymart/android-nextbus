@@ -42,6 +42,10 @@ public class BusOverlay extends Overlay {
             GeoPoint gp1 = proj.fromPixels(0, 0);
             GeoPoint gp2 = proj.fromPixels(canvas.getWidth() - 1, canvas.getHeight() - 1);
 
+            // Tell the BusInfo instance what we're looking at so that it
+            // can request only things that are in view.
+            this.busInfo.setBoundingBox(gp1, gp2);
+
             // Draw the stops we know about.
             java.util.Collection<BusInfo.Stop> stops = busInfo.getStopsInRect(gp1, gp2);
             //for (BusInfo.Stop stop : stops) {
@@ -49,7 +53,8 @@ public class BusOverlay extends Overlay {
             //}
 
             // Draw the vehicles we know about.
-            java.util.Collection<BusInfo.Vehicle> vehicles = busInfo.getVehiclesInRect(gp1, gp2);
+            //java.util.Collection<BusInfo.Vehicle> vehicles = busInfo.getVehiclesInRect(gp1, gp2);
+            java.util.Collection<BusInfo.Vehicle> vehicles = busInfo.getVehicles();
             for (BusInfo.Vehicle vehicle : vehicles) {
                 drawVehicle(canvas, vehicle, proj);
             }

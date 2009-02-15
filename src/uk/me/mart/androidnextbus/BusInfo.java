@@ -22,20 +22,39 @@ public class BusInfo {
     private Collection<Stop> stops = new HashSet<Stop>();
     private GeoMap<Stop> geoStops = new GeoMap<Stop>();
     private GeoMap<Vehicle> geoVehicles = new GeoMap<Vehicle>();
+    private Map<Integer,Vehicle> vehicles = new HashMap<Integer,Vehicle>();
 
     private Collection<UpdateListener> listeners = new HashSet<UpdateListener>();
+
+    private int minLat = 0;
+    private int minLon = 0;
+    private int maxLat = 0;
+    private int maxLon = 0;
+
+    private VehicleLocationFetcher vlf = null;
+
+    public void setBoundingBox(GeoPoint min, GeoPoint max) {
+        this.minLat = max.getLatitudeE6();
+        this.minLon = min.getLongitudeE6();
+        this.maxLat = min.getLatitudeE6();
+        this.maxLon = max.getLongitudeE6();
+    }
 
     public void startSession() {
         // Kick things off with a request to the main Google Map page
         // so that we have a session cookie for our subsequent requests.
-        DataFetcher.fetch(MAIN_PAGE_URL, new DataFetcher.Callback() {
+        /*DataFetcher.fetch(MAIN_PAGE_URL, new DataFetcher.Callback() {
             public void cb(JSONObject obj) {
                 Log.d(LOG_TAG, "Started a session with NextBus");
                 sessionStarted = true;
                 initializeInitialRoutes();
                 fireUpdateNotification();
             }
-        });
+            });*/
+        sessionStarted = true;
+        initializeInitialRoutes();
+        vlf = new VehicleLocationFetcher();
+        fireUpdateNotification();
     }
 
     public Route addRoute(String number) {
@@ -53,6 +72,10 @@ public class BusInfo {
 
     public Collection<Stop> getStops() {
         return this.stops;
+    }
+
+    public Collection<Vehicle> getVehicles() {
+        return this.vehicles.values();
     }
 
     public Collection<Stop> getStopsInRect(GeoPoint p1, GeoPoint p2) {
@@ -105,7 +128,7 @@ public class BusInfo {
 
                     // Start polling for vehicle locations
                     Log.d(LOG_TAG, "Completed initialization for route "+number);
-                    vlf = new VehicleLocationFetcher();
+                    //vlf = new VehicleLocationFetcher();
 
                     /*NodeList rnl = doc.getElementsByTagName("route");
                     if (rnl.getLength() > 0) {
@@ -149,97 +172,128 @@ public class BusInfo {
             return "http://www.nextmuni.com/s/COM.NextBus.Servlets.XMLFeed?command=routeConfig&a=sf-muni&r="+eurl(number);
         }
 
-        private class VehicleLocationFetcher implements DataFetcher.Callback, Runnable {
-            private boolean requestInProgress = false;
-            private String url = null;
-            private Handler handler = null;
-            private TimerTask timerTask = null;
+    }
 
-            public VehicleLocationFetcher() {
-                Log.d(LOG_TAG, "Starting a location fetcher for route "+number);
-                handler = new Handler();
+    private class VehicleLocationFetcher implements DataFetcher.Callback, Runnable {
+        private boolean requestInProgress = false;
+        private String url = null;
+        private Handler handler = null;
+        private TimerTask timerTask = null;
 
-                timerTask = new TimerTask() {
-                    public void run() {
-                        handler.post(VehicleLocationFetcher.this);
-                    }
-                };
+        public VehicleLocationFetcher() {
+            Log.d(LOG_TAG, "Starting a location fetcher");
+            handler = new Handler();
 
-                timer.scheduleAtFixedRate(timerTask, 2000, 15000);
-
-                this.url = "http://10.0.2.2:9080/vehicle-locations?routes="+eurl(number);
-            }
-
-            public void cb(org.json.JSONObject obj) {
-
-                if (obj != null) {
-
-                    Log.d(LOG_TAG, "Retrieved bus location information for route "+number);
-
-                    JSONArray arr = obj.optJSONArray("list");
-                    if (arr == null) {
-                        return;
-                    }
-
-                    int vehicleCount = arr.length();
-                    for (int i = 0; i < vehicleCount; i++) {
-                        JSONObject vehicleObj = arr.optJSONObject(i);
-                        if (vehicleObj == null) continue;
-
-                        int latitude = (int)(vehicleObj.optDouble("lat")*1E6);
-                        int longitude = (int)(vehicleObj.optDouble("lon")*1E6);
-                        int id = vehicleObj.optInt("id");
-                        String routeNumber = vehicleObj.optString("routeTag");
-                        int secsSinceLastReport = vehicleObj.optInt("secsSinceReport");
-                        int heading = vehicleObj.optInt("heading");
-
-                        Vehicle vehicle = new Vehicle(
-                            id,
-                            routeNumber,
-                            latitude,
-                            longitude,
-                            heading,
-                            secsSinceLastReport
-                        );
-
-                        geoVehicles.put(vehicle.getGeoPoint(), vehicle);
-                        Log.d(LOG_TAG, "Got location update for "+vehicle);
-                    }
-
-                    if (vehicleCount > 0) {
-                        fireUpdateNotification();
-                    }
-
+            timerTask = new TimerTask() {
+                public void run() {
+                    handler.post(VehicleLocationFetcher.this);
                 }
-                else {
-                    Log.d(LOG_TAG, "Failed to retrieve location information for route "+number);
-                }
-                requestInProgress = false;
-            }
+            };
 
-            public void run() {
+            timer.scheduleAtFixedRate(timerTask, 2000, 5000);
 
-                // Don't allow two requests to run concurrently
-                if (requestInProgress) {
-                    Log.d(LOG_TAG, "Not polling for locations on route "+number+" because a request is already in progress");
+            this.url = "http://10.0.2.2:7001/vehicle-locations";
+        }
+
+        public void cb(org.json.JSONObject obj) {
+
+            if (obj != null) {
+
+                Log.d(LOG_TAG, "Retrieved bus location information");
+
+                JSONArray arr = obj.optJSONArray("list");
+                if (arr == null) {
                     return;
                 }
 
-                Log.d(LOG_TAG, "Polling for bus locations on route "+number);
-                Log.d(LOG_TAG, "Request URL is "+this.getNextRequestURL());
+                int vehicleCount = arr.length();
+                vehicles.clear();
+                for (int i = 0; i < vehicleCount; i++) {
+                    JSONObject vehicleObj = arr.optJSONObject(i);
+                    if (vehicleObj == null) continue;
 
-                requestInProgress = true;
-                DataFetcher.fetch(this.getNextRequestURL(), this);
+                    int latitude = (int)(vehicleObj.optDouble("lat")*1E6);
+                    int longitude = (int)(vehicleObj.optDouble("lon")*1E6);
+                    int id = vehicleObj.optInt("id");
+                    String routeNumber = vehicleObj.optString("routeTag");
+                    int secsSinceLastReport = vehicleObj.optInt("secsSinceReport");
+                    int heading = vehicleObj.optInt("heading");
+
+                    Vehicle vehicle = new Vehicle(
+                        id,
+                        routeNumber,
+                        latitude,
+                        longitude,
+                        heading,
+                        secsSinceLastReport
+                    );
+
+                    geoVehicles.put(vehicle.getGeoPoint(), vehicle);
+                    vehicles.put(new Integer(vehicle.getId()), vehicle);
+                    Log.d(LOG_TAG, "Got location update for "+vehicle);
+                }
+
+                if (vehicleCount > 0) {
+                    fireUpdateNotification();
+                }
 
             }
-
-            private String getNextRequestURL() {
-                return this.url;
+            else {
+                Log.d(LOG_TAG, "Failed to retrieve location information");
             }
+            requestInProgress = false;
+        }
+
+        public void run() {
+
+            // Don't allow two requests to run concurrently
+            if (requestInProgress) {
+                Log.d(LOG_TAG, "Not polling for locations because a request is already in progress");
+                return;
+            }
+
+            Log.d(LOG_TAG, "Polling for bus locations");
+            Log.d(LOG_TAG, "Request URL is "+this.getNextRequestURL());
+
+            requestInProgress = true;
+            DataFetcher.fetch(this.getNextRequestURL(), this);
 
         }
 
+        private String getNextRequestURL() {
+            StringBuilder sb = new StringBuilder(this.url);
+
+            sb.append("?routes=");
+            boolean first = true;
+            for (String number : routes.keySet()) {
+                if (first) {
+                    first = false;
+                }
+                else {
+                    sb.append(",");
+                }
+                sb.append(number);
+            }
+
+            float minLon = ((float)BusInfo.this.minLon) / 1E6f;
+            float minLat = ((float)BusInfo.this.minLat) / 1E6f;
+            float maxLon = ((float)BusInfo.this.maxLon) / 1E6f;
+            float maxLat = ((float)BusInfo.this.maxLat) / 1E6f;
+
+            sb.append("&bbox=");
+            sb.append(minLat);
+            sb.append(",");
+            sb.append(minLon);
+            sb.append(",");
+            sb.append(maxLat);
+            sb.append(",");
+            sb.append(maxLon);
+
+            return sb.toString();
+        }
+
     }
+
 
     public class Stop {
         private int id;
@@ -320,6 +374,10 @@ public class BusInfo {
 
         public int hashCode() {
             return id;
+        }
+
+        public boolean equals(Vehicle other) {
+            return this.id == other.id;
         }
 
         public GeoPoint getGeoPoint() {
